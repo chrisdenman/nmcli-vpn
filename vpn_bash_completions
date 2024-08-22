@@ -1,0 +1,37 @@
+#!/bin/bash
+
+function _vpn_bash_completions() {
+  local NUM_ARGS=${#COMP_WORDS[@]}
+
+  local LAST_WORD="${COMP_WORDS[$COMP_CWORD]}"
+
+  if [ ${NUM_ARGS} -eq 2 ]; then
+    COMPREPLY=($(compgen -W "config connection" "${LAST_WORD}"))
+  elif [ ${NUM_ARGS} -eq 3 ]; then
+    if [ "${COMP_WORDS[1]}" == "config" ]; then
+      COMPREPLY=($(compgen -W "list update" "${LAST_WORD}"))
+    elif [ "${COMP_WORDS[1]}" == "connection" ]; then
+      COMPREPLY=($(compgen -W "delete import list up down" "${LAST_WORD}"))
+    fi
+  elif [ ${NUM_ARGS} -ge 4 ]; then
+    if [ ${NUM_ARGS} -eq 4 ]; then
+      if [ "${COMP_WORDS[1]}" == "connection" ]; then
+        if [ "${COMP_WORDS[2]}" == "list" ]; then
+          COMPREPLY=($(compgen -W "active" "${LAST_WORD}"))
+        fi
+      fi
+    fi
+
+    if [ "${COMP_WORDS[2]}" == "delete" ]; then
+      COMPREPLY=($(compgen -W "$(vpn connection list | tr '\n' ' ')" "${COMP_WORDS[$COMP_CWORD]}"))
+    elif [ "${COMP_WORDS[2]}" == "import" ]; then
+      COMPREPLY=($(compgen -W "$(vpn config list | tr '\n' ' ')" "${COMP_WORDS[$COMP_CWORD]}"))
+    elif [ "${COMP_WORDS[2]}" == "up" ]; then
+      COMPREPLY=($(compgen -W "$(vpn connection list | tr '\n' ' ') random" "${LAST_WORD}"))
+    elif [ "${COMP_WORDS[2]}" == "down" ]; then
+        COMPREPLY=($(compgen -W "$(vpn connection list active | tr '\n' ' ')" "${LAST_WORD}"))
+    fi
+  fi
+}
+
+complete -F _vpn_bash_completions vpn

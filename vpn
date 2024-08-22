@@ -5,6 +5,7 @@
 # Commands:
 #
 #   vpn config list                 - List all known .ovpn configuration files
+#   vpn config update               - Updates the .ovpn configuration files
 #   vpn connection import FILES...  - Import connections from the specified .ovpn configuration files
 #   vpn connection delete           - Delete all connections
 #   vpn connection delete NAMES     - Delete the named connections (as they appear in nmcli)
@@ -27,19 +28,16 @@ _on_connection() { # Tasks to perform when a vpn connected
   return 0
 }
 _on_disconnecting() { # Tasks to perform when a vpn is disconnected
-  return 0;
+  return 0
 }
 _update_config() { # Tasks to perform to update the open vpn configuration files
-  return 0;
+  return 0
 }
 _vpn_un() { # Return the VPN provider's username for the configuration file passed as argument 1
   echo "username"
 }
 _vpn_pwd() { # Return the VPN provider's password for the connection name passed as argument 1
   echo "password"
-}
-_connection_config_parse_named() { # Return a string that shows the desired parsed configuration file information
-  _connection_name_from_config_filename "$1"
 }
 
 
@@ -65,7 +63,7 @@ _config_list() {
   local i
 
   for i in $(find "${OVPN_CONFIGS_DIR}" -name "*${OVPN_EXTENSION}" -type f | sort); do
-    _connection_config_parse_named "$i"
+    echo "$i"
   done
 }
 _config() {
@@ -121,7 +119,7 @@ _connection_up_random() {
   INDEX=$(shuf -i 0-$(("$NUM" - 1)) -n 1)
   _connection_up_named "${CONNECTION_NAMES[$INDEX]}"
   else
-    echo "no connections" >&2; exit 1;
+    echo "no connections" >&2; exit 1
   fi
 }
 _connection_up_interactively() {
@@ -157,7 +155,7 @@ _connection_up_named() {
   nmcli con up "$1" passwd-file "${OVPN_SECRETS_FILE}" && _on_connection "$1"
 
   if ! rm -f "${OVPN_SECRETS_FILE}"; then
-    echo "Critical failure to delete temporary credentials file ${OVPN_SECRETS_FILE}" >&2; exit 1;
+    echo "Critical failure to delete temporary credentials file ${OVPN_SECRETS_FILE}" >&2; exit 1
   fi
 }
 _connection_going() {
