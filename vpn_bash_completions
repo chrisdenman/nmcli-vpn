@@ -1,9 +1,31 @@
 #!/bin/bash
 
+# nmcli-vpn 3.0.0
+
+# shellcheck disable=SC2125
+function _vpn_remove_array_elements() {
+  local -a diff
+  local element del
+
+  local SRC_ARRAY_NAME=$1[@]
+  local SRC_ARRAY=("${!SRC_ARRAY_NAME}")
+  local DEL_ARRAY_NAME=$2[@]
+  local DEL_ARRAY=("${!DEL_ARRAY_NAME}")
+
+  for element in "${SRC_ARRAY[@]}"
+  do
+    found=0
+    for del in "${DEL_ARRAY[@]}"; do if [[ "${element}" == "${del}" ]]; then found=1; fi; done
+    if [[ "${found}" == 0 ]]; then diff+=("$element"); fi
+  done
+  echo "${diff[@]}"
+}
+
+# shellcheck disable=SC2207,SC2086,SC2124,SC2034
 function _vpn_bash_completions() {
   local NUM_ARGS=${#COMP_WORDS[@]}
-
   local LAST_WORD="${COMP_WORDS[$COMP_CWORD]}"
+  local active possible chosen choices choice_line
 
   if [ ${NUM_ARGS} -eq 2 ]; then
     COMPREPLY=($(compgen -W "config connection" "${LAST_WORD}"))
@@ -17,19 +39,35 @@ function _vpn_bash_completions() {
     if [ ${NUM_ARGS} -eq 4 ]; then
       if [ "${COMP_WORDS[1]}" == "connection" ]; then
         if [ "${COMP_WORDS[2]}" == "list" ]; then
-          COMPREPLY=($(compgen -W "active" "${LAST_WORD}"))
+          COMPREPLY=($(compgen -W "--active" "${LAST_WORD}"))
         fi
       fi
     fi
 
+    chosen=("${COMP_WORDS[@]:3}")
     if [ "${COMP_WORDS[2]}" == "delete" ]; then
-      COMPREPLY=($(compgen -W "$(vpn connection list | tr '\n' ' ')" "${COMP_WORDS[$COMP_CWORD]}"))
+      possible=($(vpn connection list | tr '\n' ' '))
+      choices=($(_vpn_remove_array_elements possible chosen))
+      choice_line="${choices[@]}"
+      COMPREPLY=($(compgen -W "${choice_line}" "${COMP_WORDS[$COMP_CWORD]}"))
     elif [ "${COMP_WORDS[2]}" == "import" ]; then
-      COMPREPLY=($(compgen -W "$(vpn config list | tr '\n' ' ')" "${COMP_WORDS[$COMP_CWORD]}"))
+      possible=($(vpn config list | tr '\n' ' '))
+      choices=($(_vpn_remove_array_elements possible chosen))
+      choice_line="${choices[@]}"
+      COMPREPLY=($(compgen -W "${choice_line}" "${COMP_WORDS[$COMP_CWORD]}"))
     elif [ "${COMP_WORDS[2]}" == "up" ]; then
-      COMPREPLY=($(compgen -W "$(vpn connection list | tr '\n' ' ') random" "${LAST_WORD}"))
+      active=($(vpn connection list --active | tr '\n' ' '))
+      possible=($(vpn connection list | tr '\n' ' '))
+      possible+=("random")
+      possible=($(_vpn_remove_array_elements possible active))
+      choices=($(_vpn_remove_array_elements possible chosen))
+      choice_line="${choices[@]}"
+      COMPREPLY=($(compgen -W "${choice_line}" "${LAST_WORD}"))
     elif [ "${COMP_WORDS[2]}" == "down" ]; then
-        COMPREPLY=($(compgen -W "$(vpn connection list active | tr '\n' ' ')" "${LAST_WORD}"))
+      possible=($(vpn connection list --active | tr '\n' ' '))
+      choices=($(_vpn_remove_array_elements possible chosen))
+      choice_line="${choices[@]}"
+      COMPREPLY=($(compgen -W "${choice_line}" "${LAST_WORD}"))
     fi
   fi
 }

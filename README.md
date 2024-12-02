@@ -1,4 +1,4 @@
-# [nmcli-vpn 2.0.0](https://github.com/chrisdenman/nmcli-vpn)
+# [nmcli-vpn 3.0.0](https://github.com/chrisdenman/nmcli-vpn)
 
 An `nmcli` script wrapper for managing VPN connections and .ovpn configuration files on Linux.
 

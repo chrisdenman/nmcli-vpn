@@ -1,6 +1,10 @@
 #!/bin/bash
 
+# nmcli-vpn 3.0.0
+
 # An nmcli wrapper for managing VPN connections and .ovpn configuration files
+
+# https://github.com/chrisdenman/nmcli-vpn
 
 # Commands:
 #
@@ -10,7 +14,7 @@
 #   vpn connection delete           - Delete all connections
 #   vpn connection delete NAMES     - Delete the named connections (as they appear in nmcli)
 #   vpn connection list             - List all connections
-#   vpn connection list active      - List active connections
+#   vpn connection list --active    - List active connections
 #   vpn connection up               - Bring up the sole connection else displays a console menu
 #   vpn connection up NAMES...      - Bring up the connections by name (as they appear in nmcli).
 #                                     If any name has the value 'random', a random connection will be
@@ -30,6 +34,10 @@ _on_connection() { # Tasks to perform when a vpn connected
 _on_disconnecting() { # Tasks to perform when a vpn is disconnected
   return 0
 }
+_patch_config() { # Post downloading config updates
+  sed -i '/keysize.*/d' "${OVPN_CONFIGS_DIR}"/*.ovpn
+  sed -i '/comp-.*/d' "${OVPN_CONFIGS_DIR}"/*.ovpn
+}
 _update_config() { # Tasks to perform to update the open vpn configuration files
   return 0
 }
@@ -40,6 +48,7 @@ _vpn_pwd() { # Return the VPN provider's password for the connection name passed
   echo "password"
 }
 
+ME=$(basename "$0") && readonly ME
 
 ### Resource: Config
 
@@ -58,6 +67,7 @@ _config_file_basename() {
 }
 _config_update() {
   _update_config
+  _patch_config
 }
 _config_list() {
   local i
@@ -70,7 +80,8 @@ _config() {
   case "$1" in
     list) shift 1; _config_list;;            # list the known configurations and their locations
     update) shift 1; _config_update;;        # delete, and re-download the .ovpn files, refresh password files
-    *) return 1;;
+    -*) _i_o "$1";;
+    *) _i_a "$1";;
   esac
 }
 
@@ -78,10 +89,16 @@ _config() {
 ### Resource: Connection
 
 _connection_list() {
-  case "$1" in
-    active) nmcli --fields NAME,TYPE con show --active | grep "vpn" | awk '{print $1}' ORS="${ORS}";;
-    *)      nmcli --fields NAME,TYPE con show          | grep "vpn" | awk '{print $1}' ORS="${ORS}";;
-  esac
+  local activeOption=""
+  if [ "$#" -gt 0 ]; then
+    case "$1" in
+      -a|--active) activeOption="--active";;
+      -*) _i_o "$1";;
+      *) _i_a "$1";;
+    esac
+  fi
+
+  nmcli --fields NAME,TYPE con show ${activeOption} | grep "vpn" | awk '{print $1}' ORS="${ORS}"
 }
 _connection_name_from_config_filename() {
   _config_file_basename "$1"
@@ -116,8 +133,8 @@ _connection_up_random() {
   read -ra CONNECTION_NAMES <<< "$(_connection_list)"
   NUM=${#CONNECTION_NAMES[@]}
   if [ "$NUM" -gt 0 ]; then
-  INDEX=$(shuf -i 0-$(("$NUM" - 1)) -n 1)
-  _connection_up_named "${CONNECTION_NAMES[$INDEX]}"
+    INDEX=$(shuf -i 0-$(("$NUM" - 1)) -n 1)
+    _connection_up_named "${CONNECTION_NAMES[$INDEX]}"
   else
     echo "no connections" >&2; exit 1
   fi
@@ -142,6 +159,7 @@ _connection_up_interactively() {
           $(($(tput cols) - 0)) \
           $(($(tput lines) - 5)) \
           "${MENU[@]}" 2>&1 >/dev/tty)
+       # shellcheck disable=SC2181
        [[ $? == 0 ]] && _connection_up_named "${MENU[$INDEX * 2 + 1]}"
       ;;
   esac
@@ -153,7 +171,6 @@ _connection_up_named() {
   echo "vpn.secrets.password:$(_vpn_pwd "$1")" > "${OVPN_SECRETS_FILE}"
   chmod u+r "${OVPN_SECRETS_FILE}"
   nmcli con up "$1" passwd-file "${OVPN_SECRETS_FILE}" && _on_connection "$1"
-
   if ! rm -f "${OVPN_SECRETS_FILE}"; then
     echo "Critical failure to delete temporary credentials file ${OVPN_SECRETS_FILE}" >&2; exit 1
   fi
@@ -164,7 +181,7 @@ _connection_going() {
 _connection_down() {
   local connectionName args
 
-  if [ $# == 0 ]; then args="$(_connection_list active)"; else args=$*; fi
+  if [ $# == 0 ]; then args="$(_connection_list --active)"; else args=$*; fi
   for connectionName in ${args}; do _connection_going "$connectionName" "down"; done
 }
 _connection_delete() {
@@ -180,8 +197,19 @@ _connection() {
     list) shift 1; ORS="\n"; _connection_list "$@";ORS=" ";;
     up) shift 1; _connection_up "$@";;
     down) shift 1; _connection_down "$@";;
-    *) return 1;;
+    -*) _i_o "$1";;
+    *) _i_a "$1";;
   esac
+}
+
+_i_o() {
+  echo "${ME}: invalid option -- '$1'"
+  exit 1
+}
+
+_i_a() {
+  echo "${ME}: invalid argument -- '$1'"
+  exit 1
 }
 
 
@@ -191,10 +219,9 @@ OVPN_EXTENSION=".ovpn"
 ORS=' '
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    -*) echo "unknown option: $1" >&2; exit 1;;
-
     config) _config "$2"; break;;
     connection) shift 1; _connection "$@"; break;;
-    *) echo "unknown argument: $1" >&2; exit 1;;
+    -*) _i_o "$1";;
+    *) _i_a "$1";;
   esac
 done
