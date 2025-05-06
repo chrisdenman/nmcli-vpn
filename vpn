@@ -23,23 +23,22 @@
 #   vpn connection down NAMES...    - Take down the named connection (as they appear in nmcli)
 #
 
+readonly OVPN_EXTENSION=".ovpn"
+ME=$(basename "$0") && readonly ME
 
 ### User-Implemented Section
 
-OVPN_CONFIGS_DIR="$HOME"/.ovpn # The location of your .ovpn config files
+OVPN_CONFIGS_DIR="$HOME"/"${OVPN_EXTENSION}" # The location of your .ovpn config files
 
-_on_connection() { # Tasks to perform when a vpn connected
-  return 0
-}
-_on_disconnecting() { # Tasks to perform when a vpn is disconnected
-  return 0
+function _syslog() {
+  local message="$1" && shift && local priorityName="${1:-"info"}" # "emerg|alert|crit|err|warning|notice|info|debug|warn"
+  logger --id=$$ -t "vpn[$(uuidgen)]" -p "$priorityName" -s "$message"
 }
 _patch_config() { # Post downloading config updates
-  sed -i '/keysize.*/d' "${OVPN_CONFIGS_DIR}"/*.ovpn
-  sed -i '/comp-.*/d' "${OVPN_CONFIGS_DIR}"/*.ovpn
+  :
 }
 _update_config() { # Tasks to perform to update the open vpn configuration files
-  return 0
+  :
 }
 _vpn_un() { # Return the VPN provider's username for the configuration file passed as argument 1
   echo "username"
@@ -48,10 +47,26 @@ _vpn_pwd() { # Return the VPN provider's password for the connection name passed
   echo "password"
 }
 
-ME=$(basename "$0") && readonly ME
+### User-Implemented Section -- END
 
-### Resource: Config
+# shellcheck disable=SC2125
+__remove_array_elements() {
+  local -a diff
+  local element del
 
+  local SRC_ARRAY_NAME=$1[@]
+  local SRC_ARRAY=("${!SRC_ARRAY_NAME}")
+  local DEL_ARRAY_NAME=$2[@]
+  local DEL_ARRAY=("${!DEL_ARRAY_NAME}")
+
+  for element in "${SRC_ARRAY[@]}"
+  do
+    found=0
+    for del in "${DEL_ARRAY[@]}"; do if [[ "${element}" == "${del}" ]]; then found=1; fi; done
+    if [[ "${found}" == 0 ]]; then diff+=("$element"); fi
+  done
+  echo "${diff[@]}"
+}
 _configs() {
   find "${OVPN_CONFIGS_DIR}" -name "*${OVPN_EXTENSION}" -print0 -type f
 }
@@ -84,10 +99,6 @@ _config() {
     *) _i_a "$1";;
   esac
 }
-
-
-### Resource: Connection
-
 _connection_list() {
   local activeOption=""
   if [ "$#" -gt 0 ]; then
@@ -98,7 +109,13 @@ _connection_list() {
     esac
   fi
 
-  nmcli --fields NAME,TYPE con show ${activeOption} | grep "vpn" | awk '{print $1}' ORS="${ORS}"
+  nmcli --fields NAME,TYPE con show ${activeOption} | grep "vpn" | cut -d' ' -f1
+}
+_connection_list_inactive() {
+  local ACTIVE_CONNECTION_NAMES CONNECTION_NAMES
+  ACTIVE_CONNECTION_NAMES=($(_connection_list --active))
+  CONNECTION_NAMES=($(_connection_list))
+  __remove_array_elements CONNECTION_NAMES ACTIVE_CONNECTION_NAMES
 }
 _connection_name_from_config_filename() {
   _config_file_basename "$1"
@@ -115,6 +132,9 @@ _connection_import() {
 _connection_up() {
   local connectionName
 
+  # Do not allow second connections
+  _connection_list --active | grep -qo "\b$1\b" && return 1
+
   if [ "$#" -gt 0 ]; then
     for connectionName in "$@"; do
       if [ "${connectionName}" == "random" ]; then
@@ -128,40 +148,37 @@ _connection_up() {
   fi
 }
 _connection_up_random() {
-  local CONNECTION_NAMES NUM INDEX
-
-  read -ra CONNECTION_NAMES <<< "$(_connection_list)"
-  NUM=${#CONNECTION_NAMES[@]}
+  local CHOICES NUM INDEX
+  CHOICES=($(_connection_list_inactive))
+  NUM=${#CHOICES[@]}
   if [ "$NUM" -gt 0 ]; then
     INDEX=$(shuf -i 0-$(("$NUM" - 1)) -n 1)
-    _connection_up_named "${CONNECTION_NAMES[$INDEX]}"
+    _connection_up_named "${CHOICES[$INDEX]}"
   else
     echo "no connections" >&2; exit 1
   fi
 }
 _connection_up_interactively() {
-  local connection i INDEX MENU
+  local connection i CHOICES INDEX MENU
 
-  MENU=()
+  CHOICES=($(_connection_list_inactive))
   i=0
-  for connection in $(_connection_list); do
+  MENU=()
+  for connection in "${CHOICES[@]}"; do
     MENU[i]="$((i/2))"
     MENU[i+1]="${connection}"
     ((i+=2))
   done
 
   case "$i" in
-    0)  ;;
-    2)  _connection_up_named "$(_connection_list)";;
-    *)
-        INDEX=$(whiptail --menu "Connections" \
+    0)  echo "no connections" >&2; exit 1;;
+    2)  _connection_up_named "${CHOICES[@]}";;
+    *)  INDEX=$(whiptail --menu "Connections" \
           $(($(tput lines) - 0)) \
           $(($(tput cols) - 0)) \
           $(($(tput lines) - 5)) \
           "${MENU[@]}" 2>&1 >/dev/tty)
-       # shellcheck disable=SC2181
-       [[ $? == 0 ]] && _connection_up_named "${MENU[$INDEX * 2 + 1]}"
-      ;;
+        [[ $? == 0 ]] && _connection_up_named "${MENU[$INDEX * 2 + 1]}";;
   esac
 }
 _connection_up_named() {
@@ -170,13 +187,13 @@ _connection_up_named() {
   OVPN_SECRETS_FILE=$(mktemp)
   echo "vpn.secrets.password:$(_vpn_pwd "$1")" > "${OVPN_SECRETS_FILE}"
   chmod u+r "${OVPN_SECRETS_FILE}"
-  nmcli con up "$1" passwd-file "${OVPN_SECRETS_FILE}" && _on_connection "$1"
+  nmcli con up "$1" passwd-file "${OVPN_SECRETS_FILE}"
   if ! rm -f "${OVPN_SECRETS_FILE}"; then
     echo "Critical failure to delete temporary credentials file ${OVPN_SECRETS_FILE}" >&2; exit 1
   fi
 }
 _connection_going() {
-  _connection_list active | grep -qo "\b$1\b" && _on_disconnecting; nmcli con "$2" "$1"
+  _connection_list --active | grep -qo "\b$1\b" && nmcli con "$2" "$1"
 }
 _connection_down() {
   local connectionName args
@@ -194,7 +211,7 @@ _connection() {
   case "$1" in
     import) shift 1; _connection_import "$@";;
     delete) shift 1; _connection_delete "$@";;
-    list) shift 1; ORS="\n"; _connection_list "$@";ORS=" ";;
+    list) shift 1; _connection_list "$@";;
     up) shift 1; _connection_up "$@";;
     down) shift 1; _connection_down "$@";;
     -*) _i_o "$1";;
@@ -212,11 +229,6 @@ _i_a() {
   exit 1
 }
 
-
-### Entrypoint
-
-OVPN_EXTENSION=".ovpn"
-ORS=' '
 while [ "$#" -gt 0 ]; do
   case "$1" in
     config) _config "$2"; break;;
